@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ChartAnalysisSignal = typeof ChartAnalysisSignal[keyof typeof ChartAnalysisSignal];
+export type ChartAnalysisSignal = typeof ChartAnalysisSignal[keyof typeof ChartAnalysisSignal] | null;
 
 
 export const ChartAnalysisSignal = {

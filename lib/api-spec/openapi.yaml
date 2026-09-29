@@ -73,13 +73,17 @@ components:
     ChartAnalysis:
       type: object
       properties:
+        chartDetected:
+          type: boolean
         asset:
           type: string
         timeframe:
           type: string
         signal:
-          type: string
-          enum: [RED, GREEN]
+          oneOf:
+            - type: string
+              enum: [RED, GREEN]
+            - type: "null"
         confidence:
           type: integer
           minimum: 0
@@ -87,6 +91,7 @@ components:
         reason:
           type: string
       required:
+        - chartDetected
         - asset
         - timeframe
         - signal

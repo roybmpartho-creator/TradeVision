@@ -24,7 +24,7 @@ export interface ChartAnalysisRequest {
   mimeType: ChartAnalysisRequestMimeType;
 }
 
-export type ChartAnalysisSignal = typeof ChartAnalysisSignal[keyof typeof ChartAnalysisSignal];
+export type ChartAnalysisSignal = typeof ChartAnalysisSignal[keyof typeof ChartAnalysisSignal] | null;
 
 
 export const ChartAnalysisSignal = {
@@ -33,6 +33,7 @@ export const ChartAnalysisSignal = {
 } as const;
 
 export interface ChartAnalysis {
+  chartDetected: boolean;
   asset: string;
   timeframe: string;
   signal: ChartAnalysisSignal;

@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   FlatList,
-  Image,
   Pressable,
+  NativeEventEmitter,
+  NativeModules,
+  Platform,
   RefreshControl,
   StyleSheet,
   Text,
+  ToastAndroid,
   View,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -18,13 +22,28 @@ import { useAnalyzeChart, type ChartAnalysis } from '@workspace/api-client-react
 import { useColors } from '@/hooks/useColors';
 
 type SignalLog = ChartAnalysis & { id: string; createdAt: string };
-type OverlayState = 'idle' | 'analyzing' | 'result';
+type OverlayState = 'idle' | 'analyzing' | 'result' | 'warning';
+type NativeCapture = { imageBase64: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp' };
+type NativeOverlayModule = {
+  hasOverlayPermission: () => Promise<boolean>;
+  hasScreenCapturePermission: () => Promise<boolean>;
+  requestOverlayPermission: () => Promise<boolean>;
+  requestScreenCapturePermission: () => Promise<boolean>;
+  startOverlay: () => Promise<boolean>;
+  stopOverlay: () => Promise<boolean>;
+  captureNow: () => void;
+  setOverlayState: (state: string, label?: string, message?: string | null) => void;
+};
 
 const LOGS_KEY = 'overlay-signal-logs';
+const NO_CHART_MESSAGE = 'No active trading chart detected. Please switch to your chart.';
+const nativeOverlay = Platform.OS === 'android'
+  ? (NativeModules.OverlayModule as NativeOverlayModule | undefined)
+  : undefined;
 const DEMO_LOGS: SignalLog[] = [
-  { id: 'demo-1', asset: 'XAUUSD', timeframe: 'M1', signal: 'GREEN', confidence: 94, reason: 'Lower-wick rejection at intraday support with bullish body expansion.', createdAt: '09:41:18' },
-  { id: 'demo-2', asset: 'EURUSD', timeframe: 'M1', signal: 'RED', confidence: 91, reason: 'Upper-wick rejection below resistance suggests short-term exhaustion.', createdAt: '09:36:04' },
-  { id: 'demo-3', asset: 'OTC', timeframe: 'M1', signal: 'GREEN', confidence: 88, reason: 'Momentum is holding above the demand zone into the close.', createdAt: '09:29:52' },
+  { id: 'demo-1', chartDetected: true, asset: 'XAUUSD', timeframe: 'M1', signal: 'GREEN', confidence: 94, reason: 'Lower-wick rejection at intraday support with bullish body expansion.', createdAt: '09:41:18' },
+  { id: 'demo-2', chartDetected: true, asset: 'EURUSD', timeframe: 'M1', signal: 'RED', confidence: 91, reason: 'Upper-wick rejection below resistance suggests short-term exhaustion.', createdAt: '09:36:04' },
+  { id: 'demo-3', chartDetected: true, asset: 'OTC', timeframe: 'M1', signal: 'GREEN', confidence: 88, reason: 'Momentum is holding above the demand zone into the close.', createdAt: '09:29:52' },
 ];
 
 function formatTime(date: Date) {
@@ -42,56 +61,38 @@ export default function SignalDesk() {
   const [refreshing, setRefreshing] = useState(false);
   const { mutateAsync: analyzeChart, isPending } = useAnalyzeChart();
 
-  useEffect(() => {
-    AsyncStorage.getItem(LOGS_KEY).then((stored) => {
-      if (stored) {
-        try {
-          setLogs(JSON.parse(stored) as SignalLog[]);
-        } catch {
-          setLogs(DEMO_LOGS);
-        }
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    AsyncStorage.setItem(LOGS_KEY, JSON.stringify(logs)).catch(() => undefined);
-  }, [logs]);
-
-  const overlayLabel = useMemo(() => {
-    if (overlayState === 'analyzing' || isPending) return 'ANALYZING...';
-    if (signal?.signal === 'RED') return `RED ${signal.confidence}%`;
-    if (signal?.signal === 'GREEN') return `GREEN ${signal.confidence}%`;
-    return 'SCAN';
-  }, [isPending, overlayState, signal]);
-
-  const handleScan = async () => {
+  const processCapture = async (capture: NativeCapture) => {
     setSignal(null);
     setErrorMessage(null);
     setOverlayState('analyzing');
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    const picked = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false,
-      base64: true,
-      quality: 0.85,
-    });
-
-    if (picked.canceled || !picked.assets[0]?.base64) {
-      setOverlayState('idle');
-      return;
-    }
+    nativeOverlay?.setOverlayState('analyzing', 'ANALYZING...', null);
 
     try {
       const result = await analyzeChart({
         data: {
-          imageBase64: picked.assets[0].base64,
-          mimeType: (picked.assets[0].mimeType ?? 'image/jpeg') as 'image/png' | 'image/jpeg' | 'image/webp',
+          imageBase64: capture.imageBase64,
+          mimeType: capture.mimeType,
         },
       });
+
+      if (!result.chartDetected || !result.signal) {
+        setOverlayState('warning');
+        setErrorMessage(NO_CHART_MESSAGE);
+        nativeOverlay?.setOverlayState('warning', 'NO CHART', NO_CHART_MESSAGE);
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(NO_CHART_MESSAGE, ToastAndroid.LONG);
+        }
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        return;
+      }
+
       setSignal(result);
       setOverlayState('result');
+      nativeOverlay?.setOverlayState(
+        result.signal === 'GREEN' ? 'green' : 'red',
+        `${result.signal} ${result.confidence}%`,
+        null,
+      );
       setLogs((previous) => [
         {
           ...result,
@@ -107,9 +108,135 @@ export default function SignalDesk() {
       );
     } catch {
       setOverlayState('idle');
+      nativeOverlay?.setOverlayState('idle', 'SCAN', null);
       setErrorMessage('We could not read that chart. Choose a clearer screenshot and try again.');
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
+  };
+
+  useEffect(() => {
+    AsyncStorage.getItem(LOGS_KEY).then((stored) => {
+      if (stored) {
+        try {
+          setLogs(JSON.parse(stored) as SignalLog[]);
+        } catch {
+          setLogs(DEMO_LOGS);
+        }
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!nativeOverlay) return;
+    const emitter = new NativeEventEmitter();
+    const captureSubscription = emitter.addListener('OverlayCapture', (capture: NativeCapture) => {
+      void processCapture(capture);
+    });
+    const statusSubscription = emitter.addListener('OverlayStatus', (status: { enabled: boolean; state: OverlayState }) => {
+      setOverlayEnabled(status.enabled);
+      setOverlayState(status.state);
+    });
+
+    let screenCapturePrompted = false;
+    const requestScreenCaptureIfReady = async () => {
+      if (screenCapturePrompted || !(await nativeOverlay.hasOverlayPermission()) || await nativeOverlay.hasScreenCapturePermission()) return;
+      screenCapturePrompted = true;
+      const granted = await nativeOverlay.requestScreenCapturePermission();
+      if (!granted) {
+        setErrorMessage('Screen capture permission is required to scan the active chart.');
+      }
+    };
+    const requestInitialOverlayPermission = async () => {
+      const alreadyGranted = await nativeOverlay.hasOverlayPermission();
+      if (!alreadyGranted) {
+        await nativeOverlay.requestOverlayPermission();
+        setErrorMessage('Allow Display over other apps, then return here to enable the overlay.');
+      } else {
+        await requestScreenCaptureIfReady();
+      }
+    };
+    void requestInitialOverlayPermission();
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void requestScreenCaptureIfReady();
+    });
+
+    return () => {
+      captureSubscription.remove();
+      statusSubscription.remove();
+      appStateSubscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.setItem(LOGS_KEY, JSON.stringify(logs)).catch(() => undefined);
+  }, [logs]);
+
+  const overlayLabel = useMemo(() => {
+    if (overlayState === 'analyzing' || isPending) return 'ANALYZING...';
+    if (overlayState === 'warning') return 'NO CHART';
+    if (signal?.signal === 'RED') return `RED ${signal.confidence}%`;
+    if (signal?.signal === 'GREEN') return `GREEN ${signal.confidence}%`;
+    return 'SCAN';
+  }, [isPending, overlayState, signal]);
+
+  const handleOverlayToggle = async () => {
+    if (!overlayEnabled) {
+      if (!nativeOverlay) {
+        setOverlayEnabled(true);
+        return;
+      }
+      if (!(await nativeOverlay.hasOverlayPermission())) {
+        await nativeOverlay.requestOverlayPermission();
+        setErrorMessage('Allow Display over other apps, then return here to enable the overlay.');
+        return;
+      }
+      if (!(await nativeOverlay.hasScreenCapturePermission())) {
+        const granted = await nativeOverlay.requestScreenCapturePermission();
+        if (!granted) {
+          setErrorMessage('Screen capture permission is required to scan the active chart.');
+          return;
+        }
+      }
+      await nativeOverlay.startOverlay();
+      setOverlayEnabled(true);
+      return;
+    }
+
+    if (nativeOverlay) {
+      await nativeOverlay.stopOverlay();
+    }
+    setOverlayEnabled(false);
+    setOverlayState('idle');
+    setSignal(null);
+  };
+
+  const handleScan = async () => {
+    setSignal(null);
+    setErrorMessage(null);
+    setOverlayState('analyzing');
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    if (nativeOverlay && overlayEnabled) {
+      nativeOverlay.captureNow();
+      return;
+    }
+
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      base64: true,
+      quality: 0.85,
+    });
+
+    if (picked.canceled || !picked.assets[0]?.base64) {
+      setOverlayState('idle');
+      return;
+    }
+
+    await processCapture({
+      imageBase64: picked.assets[0].base64,
+      mimeType: (picked.assets[0].mimeType ?? 'image/jpeg') as NativeCapture['mimeType'],
+    });
   };
 
   const renderLog = ({ item }: { item: SignalLog }) => {
@@ -189,7 +316,7 @@ export default function SignalDesk() {
                   </Text>
                 </View>
               </View>
-              <Pressable testID="overlay-toggle" accessibilityRole="switch" accessibilityState={{ checked: overlayEnabled }} onPress={() => { setOverlayEnabled((value) => !value); Haptics.selectionAsync(); }} style={[styles.switch, { backgroundColor: overlayEnabled ? colors.primary : colors.input }]}>
+              <Pressable testID="overlay-toggle" accessibilityRole="switch" accessibilityState={{ checked: overlayEnabled }} onPress={() => { void handleOverlayToggle(); void Haptics.selectionAsync(); }} style={[styles.switch, { backgroundColor: overlayEnabled ? colors.primary : colors.input }]}>
                 <View style={[styles.switchThumb, { backgroundColor: colors.foreground, transform: [{ translateX: overlayEnabled ? 18 : 0 }] }]} />
               </Pressable>
             </View>
@@ -202,10 +329,10 @@ export default function SignalDesk() {
                 </View>
                 <Pressable testID="floating-scan" onPress={handleScan} style={({ pressed }) => [
                   styles.floatingButton,
-                  { backgroundColor: signal?.signal === 'GREEN' ? colors.green : signal?.signal === 'RED' ? colors.red : overlayState === 'analyzing' ? colors.amber : colors.card, borderColor: signal || overlayState === 'analyzing' ? 'transparent' : colors.border, opacity: pressed ? 0.82 : 1 },
+                  { backgroundColor: signal?.signal === 'GREEN' ? colors.green : signal?.signal === 'RED' ? colors.red : overlayState === 'analyzing' || overlayState === 'warning' ? colors.amber : colors.card, borderColor: signal || overlayState === 'analyzing' || overlayState === 'warning' ? 'transparent' : colors.border, opacity: pressed ? 0.82 : 1 },
                 ]}>
-                  {overlayState === 'analyzing' || isPending ? <ActivityIndicator color={colors.primaryForeground} /> : <Feather name={signal ? 'trending-up' : 'crosshair'} size={18} color={signal ? '#FFFFFF' : colors.primary} />}
-                  <Text style={[styles.floatingLabel, { color: signal || overlayState === 'analyzing' ? '#FFFFFF' : colors.foreground }]}>{overlayLabel}</Text>
+                  {overlayState === 'analyzing' || isPending ? <ActivityIndicator color={colors.primaryForeground} /> : <Feather name={signal ? 'trending-up' : overlayState === 'warning' ? 'alert-triangle' : 'crosshair'} size={18} color={signal || overlayState === 'warning' ? '#FFFFFF' : colors.primary} />}
+                  <Text style={[styles.floatingLabel, { color: signal || overlayState === 'analyzing' || overlayState === 'warning' ? '#FFFFFF' : colors.foreground }]}>{overlayLabel}</Text>
                   {signal && <Text style={styles.floatingAsset}>{signal.asset} · {signal.timeframe}</Text>}
                 </Pressable>
                 {signal && <Text style={[styles.reason, { color: colors.mutedForeground }]}>{signal.reason}</Text>}

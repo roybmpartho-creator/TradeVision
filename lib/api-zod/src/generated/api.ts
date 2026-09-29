@@ -32,9 +32,10 @@ export const analyzeChartResponseConfidenceMax = 100;
 
 
 export const AnalyzeChartResponse = zod.object({
+  "chartDetected": zod.boolean(),
   "asset": zod.string(),
   "timeframe": zod.string(),
-  "signal": zod.enum(['RED', 'GREEN']),
+  "signal": zod.union([zod.enum(['RED', 'GREEN']),zod.null()]),
   "confidence": zod.number().int().min(analyzeChartResponseConfidenceMin).max(analyzeChartResponseConfidenceMax),
   "reason": zod.string()
 })

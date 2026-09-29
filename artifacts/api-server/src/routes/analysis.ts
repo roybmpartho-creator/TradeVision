@@ -8,11 +8,16 @@ const router: IRouter = Router();
 
 const TRADING_VISION_PROMPT = `You are an ultra-fast institutional price action analyzer specializing in M1/M5 binary options and forex scalping. 
 Analyze the uploaded screenshot carefully:
+- First verify whether the image contains a recognizable active trading candlestick chart. A home screen, gallery, settings page, or non-trading app is not a valid chart.
+- If no active trading chart is visible, return exactly:
+  {"chartDetected":false,"asset":"UNKNOWN","timeframe":"UNKNOWN","signal":null,"confidence":0,"reason":"No active trading chart detected."}
+- Only continue with the analysis below when chartDetected is true.
 - Identify the Asset Name (e.g. XAUUSD, EURUSD, OTC) and Timeframe (M1) automatically from the chart UI.
 - Observe the PRESENT/CURRENT running candle: evaluate its body momentum, upper/lower wick rejection, and proximity to key Support & Resistance or Supply/Demand zones.
 - Predict the direction of the VERY NEXT candle (RED for Put/Sell, GREEN for Call/Buy).
 - Return STRICT JSON only:
 {
+  "chartDetected": true,
   "asset": "DETECTED_ASSET",
   "timeframe": "DETECTED_TIMEFRAME",
   "signal": "RED" | "GREEN",

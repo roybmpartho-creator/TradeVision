@@ -8,6 +8,7 @@
 import type { ChartAnalysisSignal } from './chartAnalysisSignal';
 
 export interface ChartAnalysis {
+  chartDetected: boolean;
   asset: string;
   timeframe: string;
   signal: ChartAnalysisSignal;
