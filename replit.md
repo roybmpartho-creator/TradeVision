@@ -1,15 +1,16 @@
-# [Project name]
+# Overlay Trading Assistant
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A professional mobile trading companion that sends chart screenshots to a secure backend and returns fast, validated next-candle signals.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server
+- `pnpm --filter @workspace/overlay-trading-assistant run dev` — run the Expo mobile app
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required secret: `GEMINI_API_KEY` — server-side Gemini chart analysis
 
 ## Stack
 
@@ -22,15 +23,24 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/overlay-trading-assistant/app/(tabs)/index.tsx` — mobile signal desk, scan flow, local signal history, and overlay preview state machine
+- `artifacts/api-server/src/routes/analysis.ts` — server-side chart analysis endpoint and strict response validation
+- `lib/api-spec/openapi.yaml` — source-of-truth contract for chart analysis
+- `artifacts/overlay-trading-assistant/constants/colors.ts` — shared dark trading palette for the mobile surface
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The Gemini key is only read by the API server; the mobile client submits screenshot data and receives a validated signal object.
+- The analysis prompt is kept server-side and requests JSON-only output so the backend can reject malformed model responses.
+- Signal history is persisted locally with AsyncStorage for a fast mobile-first dashboard without requiring user accounts.
+- The current Expo-compatible build provides an in-app overlay preview; system-level cross-app overlay and MediaProjection capture are tracked separately because they require native Android capabilities.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Premium dark signal desk with live readiness state
+- Chart screenshot selection and backend-powered RED/GREEN next-candle analysis
+- Floating overlay preview with idle, analyzing, and result states
+- Recent signal history with asset, timeframe, confidence, timestamp, and reason
 
 ## User preferences
 
@@ -38,7 +48,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- The API server requires `GEMINI_API_KEY` and should never expose it to the Expo bundle.
+- A true cross-app Android overlay requires a native development build and MediaProjection; Expo Go can preview the dashboard and in-app overlay only.
 
 ## Pointers
 

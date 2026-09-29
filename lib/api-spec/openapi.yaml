@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: analysis
+    description: Chart analysis operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /analysis/chart:
+    post:
+      operationId: analyzeChart
+      tags: [analysis]
+      summary: Analyze a trading chart screenshot
+      description: Accepts a chart screenshot and returns a validated next-candle signal.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChartAnalysisRequest"
+      responses:
+        "200":
+          description: Validated chart signal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChartAnalysis"
+        "400":
+          description: Invalid screenshot payload
+        "502":
+          description: Upstream analysis service unavailable
 components:
   schemas:
     HealthStatus:
@@ -33,4 +58,38 @@ components:
           type: string
       required:
         - status
+    ChartAnalysisRequest:
+      type: object
+      properties:
+        imageBase64:
+          type: string
+          description: Base64 encoded PNG or JPEG chart screenshot without a data URI prefix.
+        mimeType:
+          type: string
+          enum: [image/png, image/jpeg, image/webp]
+      required:
+        - imageBase64
+        - mimeType
+    ChartAnalysis:
+      type: object
+      properties:
+        asset:
+          type: string
+        timeframe:
+          type: string
+        signal:
+          type: string
+          enum: [RED, GREEN]
+        confidence:
+          type: integer
+          minimum: 0
+          maximum: 100
+        reason:
+          type: string
+      required:
+        - asset
+        - timeframe
+        - signal
+        - confidence
+        - reason
 

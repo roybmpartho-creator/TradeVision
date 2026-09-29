@@ -1,0 +1,1 @@
+- [Android overlay boundary](android-overlay-boundary.md) — Expo Go can preview the signal desk, but cross-app overlay and MediaProjection require native Android work.

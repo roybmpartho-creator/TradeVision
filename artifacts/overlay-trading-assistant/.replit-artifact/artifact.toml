@@ -1,0 +1,24 @@
+kind = "mobile"
+previewPath = "/overlay-trading-assistant/"
+title = "Overlay Trading Assistant"
+description = "A professional Android trading companion that analyzes chart screenshots through a secure backend and surfaces fast directional signals through a floating overlay."
+version = "1.0.0"
+id = "artifacts/overlay-trading-assistant"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/overlay-trading-assistant/" ]
+localPort = 21831
+
+[services.development]
+run = "pnpm --filter @workspace/overlay-trading-assistant run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/overlay-trading-assistant", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/overlay-trading-assistant", "run", "serve" ]
+
+[services.env]
+PORT = "21831"
+BASE_PATH = "/overlay-trading-assistant/"
